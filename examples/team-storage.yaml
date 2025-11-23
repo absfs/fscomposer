@@ -1,0 +1,97 @@
+version: "1.0"
+name: "team-storage"
+description: "Multi-user shared storage with permissions and quotas"
+
+nodes:
+  # Base storage
+  - id: base-storage
+    type: osfs
+    config:
+      root: /data/shared
+
+  # Apply permissions
+  - id: permissions
+    type: permfs
+    config:
+      rules:
+        # Public read for everyone
+        - path: "/public/**"
+          allow: [read]
+          users: ["*"]
+
+        # User-specific directories
+        - path: "/users/alice/**"
+          allow: [read, write, delete]
+          users: ["alice"]
+
+        - path: "/users/bob/**"
+          allow: [read, write, delete]
+          users: ["bob"]
+
+        # Admin full access
+        - path: "/admin/**"
+          allow: [read, write, delete]
+          users: ["admin"]
+
+        # Team shared directory
+        - path: "/team/**"
+          allow: [read, write]
+          users: ["alice", "bob", "charlie"]
+
+  # Apply quotas
+  - id: quotas
+    type: quotafs
+    config:
+      limits:
+        - user: alice
+          size: 10737418240  # 10GB
+          files: 100000
+
+        - user: bob
+          size: 5368709120   # 5GB
+          files: 50000
+
+        - user: charlie
+          size: 2147483648   # 2GB
+          files: 10000
+
+  # Audit logging
+  - id: audit
+    type: logfs
+    config:
+      level: info
+      output: /var/log/fscomposer/team-storage.log
+      format: json
+      fields:
+        - timestamp
+        - user
+        - operation
+        - path
+        - result
+
+  # Metrics
+  - id: metrics
+    type: metricsfs
+    config:
+      prometheus: true
+      port: 9090
+      labels:
+        type: team-storage
+
+connections:
+  - from: base-storage
+    to: permissions
+  - from: permissions
+    to: quotas
+  - from: quotas
+    to: audit
+  - from: audit
+    to: metrics
+
+mount:
+  type: nfs
+  export: /export/shared
+  root: metrics
+  options:
+    version: 4
+    async: false

@@ -1,0 +1,61 @@
+version: "1.0"
+name: "encrypted-s3-cache"
+description: "Encrypted S3 backend with local caching"
+
+nodes:
+  - id: s3-backend
+    type: s3fs
+    config:
+      bucket: my-bucket
+      region: us-east-1
+      # Credentials from environment: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+
+  - id: encryption
+    type: encryptfs
+    config:
+      algorithm: AES-256-GCM
+      keySource: env
+      keyEnv: ENCRYPT_KEY
+      encryptNames: true
+
+  - id: retry
+    type: retryfs
+    config:
+      maxRetries: 3
+      backoff: exponential
+      initialDelay: 100ms
+
+  - id: cache
+    type: cachefs
+    config:
+      size: 1073741824  # 1GB
+      policy: LRU
+      ttl: 300
+      writeThrough: false
+
+  - id: metrics
+    type: metricsfs
+    config:
+      prometheus: true
+      port: 9090
+      labels:
+        environment: production
+        backend: s3
+
+connections:
+  - from: s3-backend
+    to: encryption
+  - from: encryption
+    to: retry
+  - from: retry
+    to: cache
+  - from: cache
+    to: metrics
+
+mount:
+  type: fuse
+  path: /mnt/s3-encrypted
+  root: metrics
+  options:
+    allowOther: true
+    readOnly: false

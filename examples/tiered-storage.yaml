@@ -1,0 +1,64 @@
+version: "1.0"
+name: "tiered-storage"
+description: "Multi-tier storage with routing (hot/warm/cold)"
+
+nodes:
+  # Hot tier - in-memory for frequently accessed files
+  - id: hot-cache
+    type: memfs
+
+  # Warm tier - SSD for recent files
+  - id: warm-storage
+    type: osfs
+    config:
+      root: /mnt/ssd/warm
+
+  # Cold tier - S3 for archive
+  - id: cold-storage
+    type: s3fs
+    config:
+      bucket: archive-bucket
+      region: us-east-1
+      storageClass: GLACIER
+
+  # Router to direct traffic
+  - id: router
+    type: switchfs
+    config:
+      routes:
+        - pattern: "/hot/**"
+          target: hot-cache
+        - pattern: "/warm/**"
+          target: warm-storage
+        - pattern: "/cold/**"
+          target: cold-storage
+      default: warm-storage
+
+  # Add metrics
+  - id: metrics
+    type: metricsfs
+    config:
+      prometheus: true
+      port: 9090
+      labels:
+        tier: multi
+
+connections:
+  - from: hot-cache
+    to: router
+  - from: warm-storage
+    to: router
+  - from: cold-storage
+    to: router
+  - from: router
+    to: metrics
+
+mount:
+  type: webdav
+  port: 8080
+  root: metrics
+  options:
+    auth: basic
+    users:
+      - username: admin
+        passwordEnv: WEBDAV_PASSWORD
