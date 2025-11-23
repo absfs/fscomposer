@@ -88,10 +88,11 @@ connections:
   - from: audit
     to: metrics
 
+# WebDAV is simpler than NFS for team storage and works across all platforms
 mount:
-  type: nfs
-  export: /export/shared
+  type: webdav
+  port: 8080
   root: metrics
   options:
-    version: 4
-    async: false
+    auth: basic
+    realm: "Team Storage"

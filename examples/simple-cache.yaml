@@ -1,0 +1,37 @@
+version: "1.0"
+name: "simple-cache"
+description: "Simple cached filesystem for POC testing"
+
+nodes:
+  # Backend storage (local disk)
+  - id: backend
+    type: osfs
+    config:
+      root: /tmp/fscomposer-test
+
+  # Add caching layer
+  - id: cache
+    type: cachefs
+    config:
+      size: 1048576  # 1MB cache
+      policy: LRU
+
+  # Add metrics
+  - id: metrics
+    type: metricsfs
+    config:
+      prometheus: true
+      port: 9090
+
+connections:
+  - from: backend
+    to: cache
+  - from: cache
+    to: metrics
+
+mount:
+  type: fuse
+  path: /mnt/cached
+  root: metrics
+  options:
+    allowOther: true

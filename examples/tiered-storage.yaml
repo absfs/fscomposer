@@ -43,13 +43,10 @@ nodes:
       labels:
         tier: multi
 
+# Note: switchfs is a special multiplexer node that references its backend
+# targets via config.routes, not via connections. Only the output chain is
+# connected.
 connections:
-  - from: hot-cache
-    to: router
-  - from: warm-storage
-    to: router
-  - from: cold-storage
-    to: router
   - from: router
     to: metrics
 
