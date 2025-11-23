@@ -3,11 +3,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/absfs/fscomposer/engine"
 	"github.com/absfs/fscomposer/registry"
+	"github.com/absfs/fusefs"
 )
 
 const version = "0.1.0-poc"
@@ -29,6 +32,12 @@ func main() {
 
 	case "build":
 		if err := buildCommand(os.Args[2:]); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "mount":
+		if err := mountCommand(os.Args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -65,16 +74,18 @@ func printUsage() {
 	fmt.Println("  fscomposer <command> [arguments]")
 	fmt.Println()
 	fmt.Println("Commands:")
-	fmt.Println("  validate <spec.yaml>     Validate a composition spec")
-	fmt.Println("  build <spec.yaml>        Build and test a composition")
-	fmt.Println("  nodes [list|<type>]      Show available node types or details")
-	fmt.Println("  info <spec.yaml>         Show composition information")
-	fmt.Println("  version                  Show version information")
-	fmt.Println("  help                     Show this help message")
+	fmt.Println("  validate <spec.yaml>       Validate a composition spec")
+	fmt.Println("  build <spec.yaml>          Build and test a composition")
+	fmt.Println("  mount <spec.yaml> <path>   Mount a composition via FUSE")
+	fmt.Println("  nodes [list|<type>]        Show available node types or details")
+	fmt.Println("  info <spec.yaml>           Show composition information")
+	fmt.Println("  version                    Show version information")
+	fmt.Println("  help                       Show this help message")
 	fmt.Println()
 	fmt.Println("Examples:")
 	fmt.Println("  fscomposer validate examples/encrypted-s3.yaml")
 	fmt.Println("  fscomposer build examples/encrypted-s3.yaml")
+	fmt.Println("  fscomposer mount examples/simple-cache.yaml /mnt/myfs")
 	fmt.Println("  fscomposer nodes list")
 	fmt.Println("  fscomposer nodes cachefs")
 }
@@ -184,21 +195,6 @@ func buildCommand(args []string) error {
 	}
 
 	fmt.Printf("✓ Data integrity verified\n")
-
-	// Test: Stat the file
-	info, err := fs.Stat(testFile)
-	if err != nil {
-		return fmt.Errorf("failed to stat test file: %w", err)
-	}
-
-	fmt.Printf("✓ File stat: %s (%d bytes)\n", info.Name(), info.Size())
-
-	// Test: Remove the file
-	if err := fs.Remove(testFile); err != nil {
-		return fmt.Errorf("failed to remove test file: %w", err)
-	}
-
-	fmt.Printf("✓ Removed %s\n", testFile)
 
 	fmt.Println()
 	fmt.Printf("✓ All tests passed!\n")
@@ -332,6 +328,71 @@ func infoCommand(args []string) error {
 		fmt.Printf("  Port: %d\n", spec.Mount.Port)
 	}
 
+	return nil
+}
+
+// mountCommand mounts a composition via FUSE
+func mountCommand(args []string) error {
+	if len(args) < 2 {
+		return fmt.Errorf("usage: fscomposer mount <spec.yaml> <mountpoint>")
+	}
+
+	specFile := args[0]
+	mountpoint := args[1]
+
+	fmt.Printf("Mounting: %s at %s\n", specFile, mountpoint)
+
+	// Parse the spec
+	spec, err := engine.ParseFile(specFile)
+	if err != nil {
+		return fmt.Errorf("parse error: %w", err)
+	}
+
+	fmt.Printf("✓ Spec parsed: %s\n", spec.Name)
+
+	// Build the filesystem stack
+	builder := engine.NewBuilder(spec)
+	fs, err := builder.Build()
+	if err != nil {
+		return fmt.Errorf("build error: %w", err)
+	}
+
+	fmt.Printf("✓ Filesystem stack built\n")
+	fmt.Println("\nStack composition:")
+	printNodeChain(spec)
+	fmt.Println()
+
+	// Mount via FUSE
+	opts := fusefs.DefaultMountOptions(mountpoint)
+	opts.FSName = spec.Name
+	if spec.Description != "" {
+		opts.FSName = spec.Name + " - " + spec.Description
+	}
+
+	fmt.Printf("Mounting at %s...\n", mountpoint)
+	fmt.Println("Press Ctrl+C to unmount")
+
+	fuseFS, err := fusefs.Mount(fs, opts)
+	if err != nil {
+		return fmt.Errorf("failed to mount: %w", err)
+	}
+
+	// Set up signal handling for graceful unmount
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	fmt.Printf("✓ Mounted successfully at %s\n", mountpoint)
+	fmt.Println("\nFilesystem is now available. Press Ctrl+C to unmount.")
+
+	// Wait for interrupt signal
+	<-sigChan
+
+	fmt.Println("\nUnmounting...")
+	if err := fuseFS.Unmount(); err != nil {
+		return fmt.Errorf("failed to unmount: %w", err)
+	}
+
+	fmt.Println("✓ Unmounted successfully")
 	return nil
 }
 

@@ -13,15 +13,15 @@ nodes:
   - id: cache
     type: cachefs
     config:
-      size: 1048576  # 1MB cache
+      maxBytes: 1048576  # 1MB cache
       policy: LRU
+      metadataCache: true
 
   # Add metrics
   - id: metrics
     type: metricsfs
     config:
-      prometheus: true
-      port: 9090
+      enablePrometheus: false
 
 connections:
   - from: backend

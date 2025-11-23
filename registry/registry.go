@@ -4,7 +4,7 @@ package registry
 import (
 	"fmt"
 
-	"github.com/absfs/fscomposer/absfs"
+	"github.com/absfs/absfs"
 )
 
 // NodeConstructor is a function that creates a filesystem instance from configuration

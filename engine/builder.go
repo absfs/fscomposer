@@ -3,7 +3,7 @@ package engine
 import (
 	"fmt"
 
-	"github.com/absfs/fscomposer/absfs"
+	"github.com/absfs/absfs"
 	"github.com/absfs/fscomposer/registry"
 )
 

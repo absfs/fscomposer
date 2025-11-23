@@ -1,16 +1,15 @@
 package registry
 
 import (
-	"bytes"
 	"fmt"
-	"io"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"sync"
 	"time"
 
-	"github.com/absfs/fscomposer/absfs"
+	"github.com/absfs/absfs"
+	"github.com/absfs/cachefs"
+	"github.com/absfs/encryptfs"
+	"github.com/absfs/memfs"
+	"github.com/absfs/metricsfs"
+	"github.com/absfs/osfs"
 )
 
 func init() {
@@ -19,17 +18,12 @@ func init() {
 	registerMemFS()
 	registerCacheFS()
 	registerEncryptFS()
-	registerRetryFS()
 	registerMetricsFS()
 }
 
 // ============================================================================
 // OSFS - Operating System Filesystem
 // ============================================================================
-
-type osFS struct {
-	root string
-}
 
 func registerOSFS() {
 	Register("osfs", newOSFS, NodeSchema{
@@ -39,92 +33,33 @@ func registerOSFS() {
 			{
 				Name:        "root",
 				Type:        "string",
-				Required:    true,
-				Description: "Root directory path",
+				Required:    false,
+				Default:     ".",
+				Description: "Root directory path (default: current directory)",
 			},
 		},
 	})
 }
 
 func newOSFS(config map[string]interface{}, _ absfs.FileSystem) (absfs.FileSystem, error) {
-	root, ok := config["root"].(string)
-	if !ok {
-		return nil, fmt.Errorf("osfs requires 'root' config (string path)")
+	fs, err := osfs.NewFS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create osfs: %w", err)
 	}
 
-	// Ensure directory exists
-	if err := os.MkdirAll(root, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create root directory: %w", err)
+	// Handle root directory if specified
+	if root, ok := config["root"].(string); ok && root != "" && root != "." {
+		if err := fs.Chdir(root); err != nil {
+			return nil, fmt.Errorf("failed to change to root directory %s: %w", root, err)
+		}
 	}
 
-	return &osFS{root: root}, nil
-}
-
-func (fs *osFS) Open(name string) (absfs.File, error) {
-	return os.Open(filepath.Join(fs.root, name))
-}
-
-func (fs *osFS) Create(name string) (absfs.File, error) {
-	path := filepath.Join(fs.root, name)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return nil, err
-	}
-	return os.Create(path)
-}
-
-func (fs *osFS) Stat(name string) (fs.FileInfo, error) {
-	return os.Stat(filepath.Join(fs.root, name))
-}
-
-func (fs *osFS) ReadDir(name string) ([]fs.DirEntry, error) {
-	return os.ReadDir(filepath.Join(fs.root, name))
-}
-
-func (fs *osFS) Remove(name string) error {
-	return os.Remove(filepath.Join(fs.root, name))
-}
-
-func (fs *osFS) Mkdir(name string, perm fs.FileMode) error {
-	return os.Mkdir(filepath.Join(fs.root, name), perm)
+	return fs, nil
 }
 
 // ============================================================================
-// MemFS - In-Memory Filesystem (POC implementation)
+// MemFS - In-Memory Filesystem
 // ============================================================================
-
-type memFS struct {
-	mu    sync.RWMutex
-	files map[string]*memFile
-}
-
-type memFile struct {
-	name    string
-	data    *bytes.Buffer
-	modTime time.Time
-	mode    fs.FileMode
-}
-
-func (mf *memFile) Read(p []byte) (int, error) {
-	return mf.data.Read(p)
-}
-
-func (mf *memFile) Write(p []byte) (int, error) {
-	mf.modTime = time.Now()
-	return mf.data.Write(p)
-}
-
-func (mf *memFile) Close() error {
-	return nil
-}
-
-func (mf *memFile) Seek(offset int64, whence int) (int64, error) {
-	// Simple seek implementation
-	return 0, nil
-}
-
-func (mf *memFile) Stat() (fs.FileInfo, error) {
-	return absfs.NewFileInfo(mf.name, int64(mf.data.Len()), mf.mode, mf.modTime, false), nil
-}
 
 func registerMemFS() {
 	Register("memfs", newMemFS, NodeSchema{
@@ -135,73 +70,16 @@ func registerMemFS() {
 }
 
 func newMemFS(config map[string]interface{}, _ absfs.FileSystem) (absfs.FileSystem, error) {
-	return &memFS{
-		files: make(map[string]*memFile),
-	}, nil
-}
-
-func (fs *memFS) Open(name string) (absfs.File, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
-	f, ok := fs.files[name]
-	if !ok {
-		return nil, os.ErrNotExist
+	fs, err := memfs.NewFS()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create memfs: %w", err)
 	}
-	return f, nil
-}
-
-func (fs *memFS) Create(name string) (absfs.File, error) {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	f := &memFile{
-		name:    name,
-		data:    new(bytes.Buffer),
-		modTime: time.Now(),
-		mode:    0644,
-	}
-	fs.files[name] = f
-	return f, nil
-}
-
-func (fs *memFS) Stat(name string) (fs.FileInfo, error) {
-	fs.mu.RLock()
-	defer fs.mu.RUnlock()
-
-	f, ok := fs.files[name]
-	if !ok {
-		return nil, os.ErrNotExist
-	}
-	return absfs.NewFileInfo(f.name, int64(f.data.Len()), f.mode, f.modTime, false), nil
-}
-
-func (fs *memFS) ReadDir(name string) ([]fs.DirEntry, error) {
-	return nil, fmt.Errorf("memfs ReadDir not implemented in POC")
-}
-
-func (fs *memFS) Remove(name string) error {
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-
-	delete(fs.files, name)
-	return nil
-}
-
-func (fs *memFS) Mkdir(name string, perm fs.FileMode) error {
-	return nil // No-op for POC
+	return fs, nil
 }
 
 // ============================================================================
 // CacheFS - Caching Wrapper
 // ============================================================================
-
-type cacheFS struct {
-	underlying absfs.FileSystem
-	cache      map[string][]byte
-	mu         sync.RWMutex
-	maxSize    int
-}
 
 func registerCacheFS() {
 	Register("cachefs", newCacheFS, NodeSchema{
@@ -209,19 +87,38 @@ func registerCacheFS() {
 		Description: "Caching filesystem wrapper",
 		Fields: []SchemaField{
 			{
-				Name:        "size",
+				Name:        "maxBytes",
 				Type:        "int",
 				Required:    false,
 				Default:     1073741824, // 1GB
 				Description: "Maximum cache size in bytes",
 			},
 			{
+				Name:        "maxEntries",
+				Type:        "int",
+				Required:    false,
+				Description: "Maximum number of cached entries",
+			},
+			{
 				Name:        "policy",
 				Type:        "select",
 				Required:    false,
 				Default:     "LRU",
-				Options:     []string{"LRU", "LFU", "ARC"},
+				Options:     []string{"LRU", "LFU"},
 				Description: "Cache eviction policy",
+			},
+			{
+				Name:        "ttl",
+				Type:        "int",
+				Required:    false,
+				Description: "Time-to-live for cache entries in seconds",
+			},
+			{
+				Name:        "metadataCache",
+				Type:        "bool",
+				Required:    false,
+				Default:     true,
+				Description: "Enable metadata caching",
 			},
 		},
 	})
@@ -232,101 +129,65 @@ func newCacheFS(config map[string]interface{}, underlying absfs.FileSystem) (abs
 		return nil, fmt.Errorf("cachefs requires an underlying filesystem")
 	}
 
-	size := 1073741824 // Default 1GB
-	if s, ok := config["size"]; ok {
-		// Handle both int and float64 (YAML unmarshals numbers as float64)
-		switch v := s.(type) {
+	var opts []cachefs.Option
+
+	// Handle maxBytes
+	if mb, ok := config["maxBytes"]; ok {
+		var maxBytes uint64
+		switch v := mb.(type) {
 		case int:
-			size = v
+			maxBytes = uint64(v)
 		case float64:
-			size = int(v)
+			maxBytes = uint64(v)
+		}
+		opts = append(opts, cachefs.WithMaxBytes(maxBytes))
+	}
+
+	// Handle maxEntries
+	if me, ok := config["maxEntries"]; ok {
+		var maxEntries uint64
+		switch v := me.(type) {
+		case int:
+			maxEntries = uint64(v)
+		case float64:
+			maxEntries = uint64(v)
+		}
+		opts = append(opts, cachefs.WithMaxEntries(maxEntries))
+	}
+
+	// Handle policy
+	if policy, ok := config["policy"].(string); ok {
+		switch policy {
+		case "LRU":
+			opts = append(opts, cachefs.WithEvictionPolicy(cachefs.EvictionLRU))
+		case "LFU":
+			opts = append(opts, cachefs.WithEvictionPolicy(cachefs.EvictionLFU))
 		}
 	}
 
-	return &cacheFS{
-		underlying: underlying,
-		cache:      make(map[string][]byte),
-		maxSize:    size,
-	}, nil
-}
-
-func (fs *cacheFS) Open(name string) (absfs.File, error) {
-	// Check cache first
-	fs.mu.RLock()
-	data, cached := fs.cache[name]
-	fs.mu.RUnlock()
-
-	if cached {
-		// Return cached data
-		return &memFile{
-			name:    name,
-			data:    bytes.NewBuffer(data),
-			modTime: time.Now(),
-			mode:    0644,
-		}, nil
+	// Handle TTL
+	if ttl, ok := config["ttl"]; ok {
+		var ttlSeconds int
+		switch v := ttl.(type) {
+		case int:
+			ttlSeconds = v
+		case float64:
+			ttlSeconds = int(v)
+		}
+		opts = append(opts, cachefs.WithTTL(time.Duration(ttlSeconds)*time.Second))
 	}
 
-	// Not cached, read from underlying
-	f, err := fs.underlying.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	data, err = io.ReadAll(f)
-	if err != nil {
-		return nil, err
+	// Handle metadata cache
+	if mc, ok := config["metadataCache"].(bool); ok {
+		opts = append(opts, cachefs.WithMetadataCache(mc))
 	}
 
-	// Cache the data
-	fs.mu.Lock()
-	fs.cache[name] = data
-	fs.mu.Unlock()
-
-	return &memFile{
-		name:    name,
-		data:    bytes.NewBuffer(data),
-		modTime: time.Now(),
-		mode:    0644,
-	}, nil
-}
-
-func (fs *cacheFS) Create(name string) (absfs.File, error) {
-	// Invalidate cache
-	fs.mu.Lock()
-	delete(fs.cache, name)
-	fs.mu.Unlock()
-
-	return fs.underlying.Create(name)
-}
-
-func (fs *cacheFS) Stat(name string) (fs.FileInfo, error) {
-	return fs.underlying.Stat(name)
-}
-
-func (fs *cacheFS) ReadDir(name string) ([]fs.DirEntry, error) {
-	return fs.underlying.ReadDir(name)
-}
-
-func (fs *cacheFS) Remove(name string) error {
-	fs.mu.Lock()
-	delete(fs.cache, name)
-	fs.mu.Unlock()
-
-	return fs.underlying.Remove(name)
-}
-
-func (fs *cacheFS) Mkdir(name string, perm fs.FileMode) error {
-	return fs.underlying.Mkdir(name, perm)
+	return cachefs.New(underlying, opts...), nil
 }
 
 // ============================================================================
-// EncryptFS - Encryption Wrapper (Stub for POC)
+// EncryptFS - Encryption Wrapper
 // ============================================================================
-
-type encryptFS struct {
-	underlying absfs.FileSystem
-}
 
 func registerEncryptFS() {
 	Register("encryptfs", newEncryptFS, NodeSchema{
@@ -334,16 +195,32 @@ func registerEncryptFS() {
 		Description: "Encryption filesystem wrapper",
 		Fields: []SchemaField{
 			{
-				Name:     "algorithm",
-				Type:     "select",
-				Required: true,
-				Options:  []string{"AES-256-GCM", "ChaCha20-Poly1305"},
+				Name:        "cipher",
+				Type:        "select",
+				Required:    false,
+				Default:     "AES-256-GCM",
+				Options:     []string{"AES-256-GCM", "ChaCha20-Poly1305"},
+				Description: "Encryption cipher suite",
 			},
 			{
-				Name:     "keySource",
-				Type:     "select",
-				Required: true,
-				Options:  []string{"env", "file"},
+				Name:        "password",
+				Type:        "string",
+				Required:    true,
+				Description: "Encryption password (use env var for production)",
+			},
+			{
+				Name:        "kdfMemory",
+				Type:        "int",
+				Required:    false,
+				Default:     65536, // 64MB
+				Description: "KDF memory in KB for Argon2id",
+			},
+			{
+				Name:        "kdfIterations",
+				Type:        "int",
+				Required:    false,
+				Default:     3,
+				Description: "KDF iterations for Argon2id",
 			},
 		},
 	})
@@ -353,60 +230,73 @@ func newEncryptFS(config map[string]interface{}, underlying absfs.FileSystem) (a
 	if underlying == nil {
 		return nil, fmt.Errorf("encryptfs requires an underlying filesystem")
 	}
-	// POC: Pass-through implementation (no actual encryption)
-	return &encryptFS{underlying: underlying}, nil
-}
 
-func (fs *encryptFS) Open(name string) (absfs.File, error)              { return fs.underlying.Open(name) }
-func (fs *encryptFS) Create(name string) (absfs.File, error)            { return fs.underlying.Create(name) }
-func (fs *encryptFS) Stat(name string) (fs.FileInfo, error)             { return fs.underlying.Stat(name) }
-func (fs *encryptFS) ReadDir(name string) ([]fs.DirEntry, error)        { return fs.underlying.ReadDir(name) }
-func (fs *encryptFS) Remove(name string) error                          { return fs.underlying.Remove(name) }
-func (fs *encryptFS) Mkdir(name string, perm fs.FileMode) error         { return fs.underlying.Mkdir(name, perm) }
-
-// ============================================================================
-// RetryFS - Retry Wrapper (Stub for POC)
-// ============================================================================
-
-type retryFS struct {
-	underlying absfs.FileSystem
-}
-
-func registerRetryFS() {
-	Register("retryfs", newRetryFS, NodeSchema{
-		Type:        "retryfs",
-		Description: "Retry wrapper for resilience",
-		Fields:      []SchemaField{},
-	})
-}
-
-func newRetryFS(config map[string]interface{}, underlying absfs.FileSystem) (absfs.FileSystem, error) {
-	if underlying == nil {
-		return nil, fmt.Errorf("retryfs requires an underlying filesystem")
+	password, ok := config["password"].(string)
+	if !ok || password == "" {
+		return nil, fmt.Errorf("encryptfs requires 'password' config")
 	}
-	return &retryFS{underlying: underlying}, nil
+
+	// Parse cipher
+	cipher := encryptfs.CipherAES256GCM
+	if cipherStr, ok := config["cipher"].(string); ok {
+		switch cipherStr {
+		case "ChaCha20-Poly1305":
+			cipher = encryptfs.CipherChaCha20Poly1305
+		}
+	}
+
+	// Parse KDF params
+	memory := 65536
+	iterations := 3
+	if m, ok := config["kdfMemory"]; ok {
+		switch v := m.(type) {
+		case int:
+			memory = v
+		case float64:
+			memory = int(v)
+		}
+	}
+	if i, ok := config["kdfIterations"]; ok {
+		switch v := i.(type) {
+		case int:
+			iterations = v
+		case float64:
+			iterations = int(v)
+		}
+	}
+
+	encConfig := &encryptfs.Config{
+		Cipher: cipher,
+		KeyProvider: encryptfs.NewPasswordKeyProvider(
+			[]byte(password),
+			encryptfs.Argon2idParams{
+				Memory:      uint32(memory),
+				Iterations:  uint32(iterations),
+				Parallelism: 4,
+			},
+		),
+	}
+
+	return encryptfs.New(underlying, encConfig)
 }
 
-func (fs *retryFS) Open(name string) (absfs.File, error)              { return fs.underlying.Open(name) }
-func (fs *retryFS) Create(name string) (absfs.File, error)            { return fs.underlying.Create(name) }
-func (fs *retryFS) Stat(name string) (fs.FileInfo, error)             { return fs.underlying.Stat(name) }
-func (fs *retryFS) ReadDir(name string) ([]fs.DirEntry, error)        { return fs.underlying.ReadDir(name) }
-func (fs *retryFS) Remove(name string) error                          { return fs.underlying.Remove(name) }
-func (fs *retryFS) Mkdir(name string, perm fs.FileMode) error         { return fs.underlying.Mkdir(name, perm) }
-
 // ============================================================================
-// MetricsFS - Metrics Wrapper (Stub for POC)
+// MetricsFS - Metrics Wrapper
 // ============================================================================
-
-type metricsFS struct {
-	underlying absfs.FileSystem
-}
 
 func registerMetricsFS() {
 	Register("metricsfs", newMetricsFS, NodeSchema{
 		Type:        "metricsfs",
 		Description: "Metrics collection wrapper",
-		Fields:      []SchemaField{},
+		Fields: []SchemaField{
+			{
+				Name:        "enablePrometheus",
+				Type:        "bool",
+				Required:    false,
+				Default:     false,
+				Description: "Enable Prometheus metrics",
+			},
+		},
 	})
 }
 
@@ -414,12 +304,8 @@ func newMetricsFS(config map[string]interface{}, underlying absfs.FileSystem) (a
 	if underlying == nil {
 		return nil, fmt.Errorf("metricsfs requires an underlying filesystem")
 	}
-	return &metricsFS{underlying: underlying}, nil
-}
 
-func (fs *metricsFS) Open(name string) (absfs.File, error)              { return fs.underlying.Open(name) }
-func (fs *metricsFS) Create(name string) (absfs.File, error)            { return fs.underlying.Create(name) }
-func (fs *metricsFS) Stat(name string) (fs.FileInfo, error)             { return fs.underlying.Stat(name) }
-func (fs *metricsFS) ReadDir(name string) ([]fs.DirEntry, error)        { return fs.underlying.ReadDir(name) }
-func (fs *metricsFS) Remove(name string) error                          { return fs.underlying.Remove(name) }
-func (fs *metricsFS) Mkdir(name string, perm fs.FileMode) error         { return fs.underlying.Mkdir(name, perm) }
+	// Wrap the metricsfs with ExtendFiler to get full FileSystem interface
+	mfs := metricsfs.New(underlying)
+	return absfs.ExtendFiler(mfs), nil
+}

@@ -151,12 +151,14 @@ func (v *Validator) ValidateNodeConfigs() error {
 // Node-specific configuration validators
 
 func (v *Validator) validateOSFSConfig(node *Node) error {
+	// Root is now optional (defaults to current directory)
 	if node.Config == nil {
-		return fmt.Errorf("node %s: osfs requires 'root' config", node.ID)
+		return nil
 	}
-	root, ok := node.Config["root"].(string)
-	if !ok || root == "" {
-		return fmt.Errorf("node %s: osfs requires 'root' config (string path)", node.ID)
+	if root, ok := node.Config["root"]; ok {
+		if _, ok := root.(string); !ok {
+			return fmt.Errorf("node %s: osfs 'root' must be a string", node.ID)
+		}
 	}
 	return nil
 }
@@ -198,34 +200,49 @@ func (v *Validator) validateEncryptFSConfig(node *Node) error {
 		return fmt.Errorf("node %s: encryptfs requires configuration", node.ID)
 	}
 
-	// Validate algorithm
-	algorithm, ok := node.Config["algorithm"].(string)
-	if !ok {
-		return fmt.Errorf("node %s: encryptfs requires 'algorithm' config", node.ID)
-	}
-	validAlgos := map[string]bool{"AES-256-GCM": true, "ChaCha20-Poly1305": true}
-	if !validAlgos[algorithm] {
-		return fmt.Errorf("node %s: invalid encryption algorithm %s", node.ID, algorithm)
+	// Validate password (required)
+	password, ok := node.Config["password"].(string)
+	if !ok || password == "" {
+		return fmt.Errorf("node %s: encryptfs requires 'password' config", node.ID)
 	}
 
-	// Validate key source
-	keySource, ok := node.Config["keySource"].(string)
-	if !ok {
-		return fmt.Errorf("node %s: encryptfs requires 'keySource' config", node.ID)
+	// Validate cipher if provided
+	if cipher, ok := node.Config["cipher"].(string); ok {
+		validCiphers := map[string]bool{"AES-256-GCM": true, "ChaCha20-Poly1305": true}
+		if !validCiphers[cipher] {
+			return fmt.Errorf("node %s: invalid cipher %s (must be AES-256-GCM or ChaCha20-Poly1305)", node.ID, cipher)
+		}
 	}
 
-	// Validate key source specific configs
-	switch keySource {
-	case "env":
-		if _, ok := node.Config["keyEnv"].(string); !ok {
-			return fmt.Errorf("node %s: encryptfs with keySource=env requires 'keyEnv'", node.ID)
+	// Validate KDF params if provided
+	if kdfMemory, ok := node.Config["kdfMemory"]; ok {
+		switch v := kdfMemory.(type) {
+		case int:
+			if v <= 0 {
+				return fmt.Errorf("node %s: kdfMemory must be positive", node.ID)
+			}
+		case float64:
+			if v <= 0 {
+				return fmt.Errorf("node %s: kdfMemory must be positive", node.ID)
+			}
+		default:
+			return fmt.Errorf("node %s: kdfMemory must be a number", node.ID)
 		}
-	case "file":
-		if _, ok := node.Config["keyFile"].(string); !ok {
-			return fmt.Errorf("node %s: encryptfs with keySource=file requires 'keyFile'", node.ID)
+	}
+
+	if kdfIter, ok := node.Config["kdfIterations"]; ok {
+		switch v := kdfIter.(type) {
+		case int:
+			if v <= 0 {
+				return fmt.Errorf("node %s: kdfIterations must be positive", node.ID)
+			}
+		case float64:
+			if v <= 0 {
+				return fmt.Errorf("node %s: kdfIterations must be positive", node.ID)
+			}
+		default:
+			return fmt.Errorf("node %s: kdfIterations must be a number", node.ID)
 		}
-	default:
-		return fmt.Errorf("node %s: invalid keySource %s (must be env or file)", node.ID, keySource)
 	}
 
 	return nil
