@@ -8,12 +8,17 @@
   let dragStartX = 0;
   let dragStartY = 0;
   let draggedNode = null;
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
+  let dragOffsetGridX = 0;
+  let dragOffsetGridY = 0;
 
   $: scale = $canvasState.scale;
   $: offsetX = $canvasState.offsetX;
   $: offsetY = $canvasState.offsetY;
+
+  // Isometric grid constants
+  const TILE_WIDTH = 60;
+  const TILE_HEIGHT = 30;
+  const CUBE_SIZE = 60;
 
   onMount(() => {
     ctx = canvas.getContext('2d');
@@ -37,6 +42,27 @@
     draw();
   }
 
+  // Convert grid coordinates to screen coordinates
+  function gridToScreen(gridX, gridY) {
+    const screenX = (gridX - gridY) * TILE_WIDTH / 2;
+    const screenY = (gridX + gridY) * TILE_HEIGHT / 2;
+    return {
+      x: screenX * scale + canvas.width / 2 + offsetX,
+      y: screenY * scale + 100 + offsetY
+    };
+  }
+
+  // Convert screen coordinates to grid coordinates
+  function screenToGrid(screenX, screenY) {
+    const centerX = canvas.width / 2 + offsetX;
+    const centerY = 100 + offsetY;
+    const x = (screenX - centerX) / scale;
+    const y = (screenY - centerY) / scale;
+    const gridX = Math.round((x / TILE_WIDTH + y / TILE_HEIGHT));
+    const gridY = Math.round((y / TILE_HEIGHT - x / TILE_WIDTH));
+    return { gridX, gridY };
+  }
+
   function draw() {
     if (!ctx) return;
 
@@ -50,46 +76,56 @@
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, width, height);
 
-    // Draw isometric grid
-    drawGrid();
+    // Draw isometric grid covering entire canvas
+    drawIsometricGrid();
 
     // Draw connections
     drawConnections();
 
-    // Draw nodes
+    // Draw nodes sorted by depth
     drawNodes();
   }
 
-  function drawGrid() {
+  function drawIsometricGrid() {
     const width = canvas.width;
     const height = canvas.height;
-    const gridSize = 40 * scale;
-    const isoAngle = Math.PI / 6; // 30 degrees
 
     ctx.strokeStyle = '#1a1a1a';
     ctx.lineWidth = 1;
 
-    // Horizontal lines
-    for (let y = (offsetY % gridSize) - gridSize; y < height + gridSize; y += gridSize) {
+    // Calculate grid bounds to cover entire canvas
+    const centerX = width / 2 + offsetX;
+    const centerY = 100 + offsetY;
+
+    // Determine how many grid lines we need
+    const gridRange = Math.max(width, height) / (TILE_WIDTH * scale) + 20;
+
+    ctx.save();
+
+    // Draw diagonal lines forming isometric diamond pattern
+    for (let i = -gridRange; i <= gridRange; i++) {
+      // Lines going down-right (30 degrees)
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
+      const x1 = centerX + i * TILE_WIDTH / 2 * scale;
+      const y1 = centerY + i * TILE_HEIGHT / 2 * scale;
+      const x2 = centerX + (i - gridRange * 2) * TILE_WIDTH / 2 * scale;
+      const y2 = centerY + (i + gridRange * 2) * TILE_HEIGHT / 2 * scale;
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+
+      // Lines going down-left (-30 degrees)
+      ctx.beginPath();
+      const x3 = centerX - i * TILE_WIDTH / 2 * scale;
+      const y3 = centerY + i * TILE_HEIGHT / 2 * scale;
+      const x4 = centerX - (i - gridRange * 2) * TILE_WIDTH / 2 * scale;
+      const y4 = centerY + (i + gridRange * 2) * TILE_HEIGHT / 2 * scale;
+      ctx.moveTo(x3, y3);
+      ctx.lineTo(x4, y4);
       ctx.stroke();
     }
 
-    // Diagonal lines (isometric)
-    ctx.strokeStyle = '#151515';
-    for (let x = (offsetX % gridSize) - gridSize; x < width + gridSize; x += gridSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x + height / Math.tan(isoAngle), height);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x - height / Math.tan(isoAngle), height);
-      ctx.stroke();
-    }
+    ctx.restore();
   }
 
   function drawConnections() {
@@ -101,8 +137,14 @@
 
       if (!fromNode || !toNode) return;
 
-      const fromPos = toScreenCoords(fromNode.x, fromNode.y);
-      const toPos = toScreenCoords(toNode.x, toNode.y);
+      const fromPos = gridToScreen(fromNode.gridX || 0, fromNode.gridY || 0);
+      const toPos = gridToScreen(toNode.gridX || 0, toNode.gridY || 0);
+
+      // Calculate cube centers
+      const fromCenterX = fromPos.x;
+      const fromCenterY = fromPos.y + TILE_HEIGHT * scale;
+      const toCenterX = toPos.x;
+      const toCenterY = toPos.y + TILE_HEIGHT * scale;
 
       // Draw glowing line
       ctx.save();
@@ -111,16 +153,16 @@
       ctx.strokeStyle = 'rgba(99, 102, 241, 0.2)';
       ctx.lineWidth = 8;
       ctx.beginPath();
-      ctx.moveTo(fromPos.x + 40, fromPos.y + 30);
-      ctx.lineTo(toPos.x + 40, toPos.y + 30);
+      ctx.moveTo(fromCenterX, fromCenterY);
+      ctx.lineTo(toCenterX, toCenterY);
       ctx.stroke();
 
       // Inner line
       ctx.strokeStyle = '#6366f1';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(fromPos.x + 40, fromPos.y + 30);
-      ctx.lineTo(toPos.x + 40, toPos.y + 30);
+      ctx.moveTo(fromCenterX, fromCenterY);
+      ctx.lineTo(toCenterX, toCenterY);
       ctx.stroke();
 
       ctx.restore();
@@ -130,62 +172,87 @@
   function drawNodes() {
     if (!$composition.nodes) return;
 
-    $composition.nodes.forEach(node => {
-      const pos = toScreenCoords(node.x, node.y);
+    // Sort nodes by depth (back to front)
+    const sortedNodes = [...$composition.nodes].sort((a, b) => {
+      const depthA = (a.gridY || 0) + (a.gridX || 0);
+      const depthB = (b.gridY || 0) + (b.gridX || 0);
+      return depthA - depthB;
+    });
+
+    sortedNodes.forEach(node => {
+      const gridX = node.gridX || 0;
+      const gridY = node.gridY || 0;
+      const pos = gridToScreen(gridX, gridY);
       const isSelected = $selectedNode && $selectedNode.id === node.id;
       const color = node.category === 'backend' ? '#6366f1' : '#8b5cf6';
 
-      drawIsometricBlock(pos.x, pos.y, 80, 60, 40, color, isSelected, node.name);
+      drawIsometricCube(pos.x, pos.y, CUBE_SIZE * scale, color, isSelected, node.name);
     });
   }
 
-  function drawIsometricBlock(x, y, width, height, depth, color, isSelected, label) {
+  function drawIsometricCube(x, y, size, color, isSelected, label) {
     ctx.save();
 
-    // Convert to isometric coordinates
-    const isoX = x + (width / 2);
-    const isoY = y;
+    const halfSize = size / 2;
+    const quarterSize = size / 4;
 
-    // Top face
-    ctx.fillStyle = lightenColor(color, 20);
+    // Add glow if selected
     if (isSelected) {
       ctx.shadowColor = color;
       ctx.shadowBlur = 20;
     }
+
+    // Top face (lightest)
+    ctx.fillStyle = lightenColor(color, 30);
     ctx.beginPath();
-    ctx.moveTo(isoX, isoY);
-    ctx.lineTo(isoX + width / 2, isoY + height / 4);
-    ctx.lineTo(isoX, isoY + height / 2);
-    ctx.lineTo(isoX - width / 2, isoY + height / 4);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + halfSize, y + quarterSize);
+    ctx.lineTo(x, y + halfSize);
+    ctx.lineTo(x - halfSize, y + quarterSize);
     ctx.closePath();
     ctx.fill();
 
-    // Left face
+    // Remove shadow for other faces
     ctx.shadowBlur = 0;
-    ctx.fillStyle = darkenColor(color, 20);
+
+    // Left face (medium dark)
+    ctx.fillStyle = darkenColor(color, 30);
     ctx.beginPath();
-    ctx.moveTo(isoX - width / 2, isoY + height / 4);
-    ctx.lineTo(isoX, isoY + height / 2);
-    ctx.lineTo(isoX, isoY + height / 2 + depth);
-    ctx.lineTo(isoX - width / 2, isoY + height / 4 + depth);
+    ctx.moveTo(x - halfSize, y + quarterSize);
+    ctx.lineTo(x, y + halfSize);
+    ctx.lineTo(x, y + size);
+    ctx.lineTo(x - halfSize, y + size - quarterSize);
     ctx.closePath();
     ctx.fill();
 
-    // Right face
-    ctx.fillStyle = color;
+    // Right face (darkest)
+    ctx.fillStyle = darkenColor(color, 10);
     ctx.beginPath();
-    ctx.moveTo(isoX + width / 2, isoY + height / 4);
-    ctx.lineTo(isoX, isoY + height / 2);
-    ctx.lineTo(isoX, isoY + height / 2 + depth);
-    ctx.lineTo(isoX + width / 2, isoY + height / 4 + depth);
+    ctx.moveTo(x + halfSize, y + quarterSize);
+    ctx.lineTo(x, y + halfSize);
+    ctx.lineTo(x, y + size);
+    ctx.lineTo(x + halfSize, y + size - quarterSize);
     ctx.closePath();
     ctx.fill();
+
+    // Draw edges for better definition
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.lineWidth = 1;
+
+    // Top edges
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + halfSize, y + quarterSize);
+    ctx.lineTo(x, y + halfSize);
+    ctx.lineTo(x - halfSize, y + quarterSize);
+    ctx.closePath();
+    ctx.stroke();
 
     // Label
     ctx.fillStyle = '#e0e0e0';
-    ctx.font = '12px Inter, sans-serif';
+    ctx.font = `${Math.max(10, 12 * scale)}px Inter, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(label, isoX, isoY + height / 2 + depth + 20);
+    ctx.fillText(label, x, y + size + 20 * scale);
 
     ctx.restore();
   }
@@ -208,20 +275,6 @@
     return `rgb(${R}, ${G}, ${B})`;
   }
 
-  function toScreenCoords(worldX, worldY) {
-    return {
-      x: worldX * scale + offsetX,
-      y: worldY * scale + offsetY
-    };
-  }
-
-  function toWorldCoords(screenX, screenY) {
-    return {
-      x: (screenX - offsetX) / scale,
-      y: (screenY - offsetY) / scale
-    };
-  }
-
   function handleMouseDown(e) {
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -232,9 +285,8 @@
 
     if (clickedNode) {
       draggedNode = clickedNode;
-      const pos = toScreenCoords(clickedNode.x, clickedNode.y);
-      dragOffsetX = mouseX - pos.x;
-      dragOffsetY = mouseY - pos.y;
+      dragOffsetGridX = clickedNode.gridX || 0;
+      dragOffsetGridY = clickedNode.gridY || 0;
       selectedNode.set(clickedNode);
     } else {
       isDragging = true;
@@ -250,12 +302,17 @@
     const mouseY = e.clientY - rect.top;
 
     if (draggedNode) {
-      const worldPos = toWorldCoords(mouseX - dragOffsetX, mouseY - dragOffsetY);
+      // Snap to grid when dragging
+      const gridPos = screenToGrid(mouseX, mouseY);
       composition.update(c => {
         const node = c.nodes.find(n => n.id === draggedNode.id);
         if (node) {
-          node.x = worldPos.x;
-          node.y = worldPos.y;
+          node.gridX = gridPos.gridX;
+          node.gridY = gridPos.gridY;
+          // Keep old x/y for backward compatibility
+          const screenPos = gridToScreen(gridPos.gridX, gridPos.gridY);
+          node.x = screenPos.x;
+          node.y = screenPos.y;
         }
         return c;
       });
@@ -290,9 +347,12 @@
     const newScale = Math.max(0.5, Math.min(2, scale * delta));
 
     // Zoom towards mouse position
-    const worldPos = toWorldCoords(mouseX, mouseY);
-    const newOffsetX = mouseX - worldPos.x * newScale;
-    const newOffsetY = mouseY - worldPos.y * newScale;
+    const worldPosOld = {
+      x: (mouseX - offsetX - canvas.width / 2) / scale,
+      y: (mouseY - offsetY - 100) / scale
+    };
+    const newOffsetX = mouseX - canvas.width / 2 - worldPosOld.x * newScale;
+    const newOffsetY = mouseY - 100 - worldPosOld.y * newScale;
 
     canvasState.update(s => ({
       ...s,
@@ -305,14 +365,31 @@
   function findNodeAtPosition(x, y) {
     if (!$composition.nodes) return null;
 
-    // Check in reverse order (top nodes first)
-    for (let i = $composition.nodes.length - 1; i >= 0; i--) {
-      const node = $composition.nodes[i];
-      const pos = toScreenCoords(node.x, node.y);
+    // Check in reverse order (front nodes first based on depth)
+    const sortedNodes = [...$composition.nodes].sort((a, b) => {
+      const depthA = (a.gridY || 0) + (a.gridX || 0);
+      const depthB = (b.gridY || 0) + (b.gridX || 0);
+      return depthB - depthA; // Reverse for front to back
+    });
 
-      // Simple bounding box check
-      if (x >= pos.x && x <= pos.x + 80 &&
-          y >= pos.y && y <= pos.y + 80) {
+    for (const node of sortedNodes) {
+      const gridX = node.gridX || 0;
+      const gridY = node.gridY || 0;
+      const pos = gridToScreen(gridX, gridY);
+      const size = CUBE_SIZE * scale;
+      const halfSize = size / 2;
+
+      // Isometric hit detection (diamond shape for top)
+      const dx = x - pos.x;
+      const dy = y - pos.y;
+
+      // Check if point is inside the isometric cube's bounding area
+      if (Math.abs(dx) / halfSize + Math.abs(dy - halfSize / 2) / (halfSize / 2) <= 1) {
+        return node;
+      }
+
+      // Also check the vertical faces
+      if (dy > 0 && dy < size && Math.abs(dx) < halfSize) {
         return node;
       }
     }
@@ -328,16 +405,33 @@
     const rect = canvas.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-    const worldPos = toWorldCoords(mouseX, mouseY);
+
+    // Snap to grid
+    const gridPos = screenToGrid(mouseX, mouseY);
+    const screenPos = gridToScreen(gridPos.gridX, gridPos.gridY);
 
     const nodeData = JSON.parse(nodeType);
+
+    // Auto-layout based on connections
+    let finalGridX = gridPos.gridX;
+    let finalGridY = gridPos.gridY;
+
+    // If this is a wrapper (has inputs), position inputs above it
+    if (nodeData.category === 'wrapper') {
+      // This will be the receiver at bottom-center
+      finalGridX = gridPos.gridX;
+      finalGridY = gridPos.gridY;
+    }
+
     const newNode = {
       id: `node_${Date.now()}`,
       name: nodeData.name,
       type: nodeData.type,
       category: nodeData.category,
-      x: worldPos.x,
-      y: worldPos.y,
+      gridX: finalGridX,
+      gridY: finalGridY,
+      x: screenPos.x, // Keep for backward compatibility
+      y: screenPos.y,
       config: {}
     };
 
