@@ -1,0 +1,24 @@
+version: "1.0"
+name: "memory-cache"
+description: "In-memory filesystem with caching (POC demo)"
+
+nodes:
+  # Backend storage (in-memory)
+  - id: backend
+    type: memfs
+
+  # Add caching layer (redundant but demonstrates composition)
+  - id: cache
+    type: cachefs
+    config:
+      size: 524288  # 512KB cache
+      policy: LRU
+
+connections:
+  - from: backend
+    to: cache
+
+mount:
+  type: api
+  root: cache
+  port: 8080
