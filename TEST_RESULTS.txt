@@ -1,0 +1,56 @@
+=== RUN   TestNodeTypes
+    integration_test.go:22: Found 5 node types
+    integration_test.go:39: ✓ Node type memfs registered
+    integration_test.go:39: ✓ Node type osfs registered
+    integration_test.go:39: ✓ Node type cachefs registered
+    integration_test.go:39: ✓ Node type encryptfs registered
+    integration_test.go:39: ✓ Node type metricsfs registered
+--- PASS: TestNodeTypes (0.00s)
+=== RUN   TestNodeSchemas
+    integration_test.go:63: ✓ cachefs: Caching filesystem wrapper
+    integration_test.go:63: ✓ encryptfs: Encryption filesystem wrapper
+    integration_test.go:63: ✓ metricsfs: Metrics collection wrapper
+    integration_test.go:63: ✓ osfs: Local operating system filesystem
+    integration_test.go:63: ✓ memfs: In-memory filesystem
+--- PASS: TestNodeSchemas (0.00s)
+=== RUN   TestSimpleComposition
+    integration_test.go:101: ✓ Validation passed
+    integration_test.go:109: ✓ Filesystem built
+    integration_test.go:127: ✓ Wrote 13 bytes
+    integration_test.go:140: ✓ Read 13 bytes
+    integration_test.go:146: ✓ Data integrity verified
+    integration_test.go:153: ✓ Directory created
+    integration_test.go:163: ✓ File created in directory
+    integration_test.go:173: ✓ Directory stat successful
+--- PASS: TestSimpleComposition (0.00s)
+=== RUN   TestEncryptedComposition
+    integration_test.go:231: ✓ Encrypted filesystem built
+    integration_test.go:244: ✓ Data written (encrypted)
+    integration_test.go:260: ✓ Data decrypted correctly
+    integration_test.go:274: ✓ Data is encrypted on disk
+--- PASS: TestEncryptedComposition (0.07s)
+=== RUN   TestFullStack
+    integration_test.go:341: ✓ Full stack built: storage → encrypt → cache → metrics
+    integration_test.go:356: ✓ Wrote 28 bytes
+    integration_test.go:372: ✓ Data integrity verified through full stack
+    integration_test.go:376: ✓ Full stack test complete
+--- PASS: TestFullStack (0.06s)
+=== RUN   TestCycleDetection
+    integration_test.go:407: ✓ Cycle detected: cycle detected in connection graph involving node node1
+--- PASS: TestCycleDetection (0.00s)
+=== RUN   TestInvalidNodeType
+    integration_test.go:432: ✓ Invalid node type detected: node invalid: unknown type nonexistent-type
+--- PASS: TestInvalidNodeType (0.00s)
+=== RUN   TestParseYAML
+    integration_test.go:488: ✓ YAML parsing successful
+--- PASS: TestParseYAML (0.00s)
+goos: darwin
+goarch: arm64
+pkg: github.com/absfs/fscomposer
+cpu: Apple M3 Max
+BenchmarkSimpleStack
+BenchmarkSimpleStack-16       	 5987187	       987.6 ns/op
+BenchmarkEncryptedStack
+BenchmarkEncryptedStack-16    	      92	  63364676 ns/op
+PASS
+ok  	github.com/absfs/fscomposer	12.980s

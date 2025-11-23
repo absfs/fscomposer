@@ -1,5 +1,6 @@
 # Binaries
 fscomposer
+fscomposer-server
 fscomposesd
 *.exe
 *.exe~
@@ -37,6 +38,10 @@ frontend/build/
 frontend/dist/
 frontend/.env
 frontend/.env.local
+web/node_modules/
+web/dist/
+web/.env
+web/.env.local
 
 # Runtime
 *.db
