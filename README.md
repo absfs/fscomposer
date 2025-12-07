@@ -2,7 +2,8 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/absfs/fscomposer.svg)](https://pkg.go.dev/github.com/absfs/fscomposer)
 [![Go Report Card](https://goreportcard.com/badge/github.com/absfs/fscomposer)](https://goreportcard.com/report/github.com/absfs/fscomposer)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/absfs/fscomposer/actions/workflows/ci.yml/badge.svg)](https://github.com/absfs/fscomposer/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Visual Filesystem Composition Studio for the absfs Ecosystem**
 
