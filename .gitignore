@@ -1,7 +1,7 @@
-# Binaries
-fscomposer
-fscomposer-server
-fscomposesd
+# Binaries (root level only, not source directories)
+/fscomposer
+/fscomposer-server
+/fscomposesd
 *.exe
 *.exe~
 *.dll
