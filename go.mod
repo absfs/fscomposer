@@ -3,24 +3,25 @@ module github.com/absfs/fscomposer
 go 1.24.0
 
 require (
-	github.com/absfs/absfs v0.0.0-20251123020225-d768e7374215
-	github.com/absfs/cachefs v0.0.0-20251123015111-cec16b23d99f
-	github.com/absfs/encryptfs v0.0.0-20251123014948-0d7dec203ca6
-	github.com/absfs/fusefs v0.0.0-20251123031922-287595f78b52
-	github.com/absfs/memfs v0.0.0-20251123003602-523f8650011b
-	github.com/absfs/metricsfs v0.0.0-20251123015031-bb4c92bb839e
-	github.com/absfs/osfs v0.0.0-20220705103527-80b6215cf130
+	github.com/absfs/absfs v0.9.0
+	github.com/absfs/cachefs v0.9.0
+	github.com/absfs/encryptfs v0.9.0
+	github.com/absfs/fusefs v0.9.0
+	github.com/absfs/memfs v0.9.0
+	github.com/absfs/metricsfs v0.9.0
+	github.com/absfs/osfs v0.9.0
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/absfs/inode v0.0.0-20190804195220-b7cd14cdd0dc // indirect
+	github.com/absfs/inode v0.9.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/hanwen/go-fuse/v2 v2.9.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
